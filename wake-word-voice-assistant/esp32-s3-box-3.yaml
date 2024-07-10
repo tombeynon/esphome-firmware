@@ -45,6 +45,7 @@ esphome:
     priority: 600
     then:
       - script.execute: draw_display
+      - media_player.volume_set: 80% # temporary volume adjustment
       - delay: 30s
       - if:
           condition:
@@ -74,11 +75,11 @@ psram:
   speed: 80MHz
 
 external_components:
-  - source: github://pr#5230
-    components: esp_adf
-    refresh: 0s
-  - source: github://jesserockz/esphome-components
-    components: [file]
+  - source:
+      type: git
+      url: https://github.com/gnumpi/esphome_audio
+      ref: dev-next
+    components: [ adf_pipeline, i2s_audio ]
     refresh: 0s
 
 api:
@@ -171,16 +172,75 @@ light:
     restore_mode: RESTORE_DEFAULT_ON
     default_transition_length: 250ms
 
-esp_adf:
-  board: esp32s3box3
+i2c:
+  - id: bus_a
+    sda: GPIO08
+    scl: GPIO18
+    scan: false
+    sda_pullup_enabled: true
+    scl_pullup_enabled: true
+    frequency: 100kHz
+
+i2s_audio:
+  - id: i2s_shared
+    i2s_lrclk_pin: GPIO45
+    i2s_bclk_pin: GPIO17
+    i2s_mclk_pin: GPIO2
+    access_mode: duplex
+
+adf_pipeline:
+  - platform: i2s_audio
+    type: audio_out
+    id: adf_i2s_out
+    i2s_audio_id: i2s_shared
+    i2s_dout_pin: GPIO15
+    adf_alc: false
+    dac:
+      i2c_id: bus_a
+      model: es8311
+      address: 0x18
+      enable_pin: GPIO46
+    sample_rate: 16000
+    bits_per_sample: 16bit
+    fixed_settings: true
+
+  - platform: i2s_audio
+    type: audio_in
+    id: adf_i2s_in
+    i2s_audio_id: i2s_shared
+    i2s_din_pin: GPIO16
+    pdm: false
+    adc:
+      i2c_id: bus_a
+      model: es7210
+      address: 0x40
+    sample_rate: 16000
+    bits_per_sample: 16bit
+    fixed_settings: true
+
+media_player:
+  - platform: adf_pipeline
+    id: adf_media_player
+    name: Player
+    internal: false
+    keep_pipeline_alive: true
+    announcement_audio:
+      sample_rate: 24000
+      bits_per_sample: 16
+      num_channels: 1
+    pipeline:
+      - self
+      - resampler
+      - adf_i2s_out
 
 microphone:
-  - platform: esp_adf
-    id: box_mic
-
-speaker:
-  - platform: esp_adf
-    id: box_speaker
+  - platform: adf_pipeline
+    id: adf_microphone
+    keep_pipeline_alive: true
+    pipeline:
+      - adf_i2s_in
+      - resampler
+      - self
 
 micro_wake_word:
   model: ${micro_wake_word_model}
@@ -190,12 +250,12 @@ micro_wake_word:
 
 voice_assistant:
   id: va
-  microphone: box_mic
-  speaker: box_speaker
+  microphone: adf_microphone
+  media_player: adf_media_player
   noise_suppression_level: 2
   auto_gain: 31dBFS
   volume_multiplier: 2.0
-  vad_threshold: 3
+  # vad_threshold: 3
   on_listening:
     - lambda: id(voice_assistant_phase) = ${voice_assist_listening_phase_id};
     - text_sensor.template.publish:
@@ -217,12 +277,15 @@ voice_assistant:
     - text_sensor.template.publish:
         id: text_response
         state: !lambda return x;
-  on_tts_stream_start:
     - lambda: id(voice_assistant_phase) = ${voice_assist_replying_phase_id};
     - script.execute: draw_display
-  on_tts_stream_end:
+  on_tts_end:
+    - delay: 1s
+    - wait_until:
+        media_player.is_idle:
     - lambda: id(voice_assistant_phase) = ${voice_assist_idle_phase_id};
     - script.execute: draw_display
+
   on_end:
     - if:
         condition:
@@ -280,11 +343,13 @@ voice_assistant:
         condition:
           switch.is_on: timer_ringing
         then:
-          - lambda: id(box_speaker).play(id(timer_finished_wave_file), sizeof(id(timer_finished_wave_file)));
+          # - media_player.play_media: !lambda return id(timer_finished_wave_file)
+          - media_player.play_media: 'http://homeassistant.local:8123/local/esphome/timer_finished.mp3'
           - delay: 1s
+          - wait_until:
+              media_player.is_idle:
     - wait_until:
-        not:
-          speaker.is_playing:
+        media_player.is_idle:
     - switch.turn_off: timer_ringing
     - script.execute: start_voice_assistant
     - script.execute: draw_display
@@ -709,9 +774,9 @@ color:
   - id: paused_timer_color
     hex: "3b89e3"
 
-file:
-  - id: timer_finished_wave_file
-    file: https://github.com/esphome/firmware/raw/main/voice-assistant/sounds/timer_finished.wav
+# file:
+#   - id: timer_finished_wave_file
+#     file: https://github.com/esphome/firmware/raw/main/voice-assistant/sounds/timer_finished.wav
 
 spi:
   - id: spi_bus
