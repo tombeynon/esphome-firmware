@@ -1,7 +1,7 @@
 {
   "name": "ESPHome - Firmware",
   "image": "mcr.microsoft.com/vscode/devcontainers/python:0-3.10",
-  "postCreateCommand": "pip3 install esphome",
+  "postCreateCommand": "pip3 install esphome pillow==10.2.0",
   "runArgs": ["--device=/dev/bus/usb", "--privileged"],
   "features": {
     "ghcr.io/devcontainers/features/github-cli": {}
