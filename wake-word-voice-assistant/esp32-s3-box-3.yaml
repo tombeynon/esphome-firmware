@@ -45,7 +45,6 @@ esphome:
     priority: 600
     then:
       - script.execute: draw_display
-      - media_player.volume_set: 80% # temporary volume adjustment
       - delay: 30s
       - if:
           condition:
@@ -274,6 +273,7 @@ voice_assistant:
         state: !lambda return x;
     - script.execute: draw_display
   on_tts_start:
+    - script.execute: set_speech_volume
     - text_sensor.template.publish:
         id: text_response
         state: !lambda return x;
@@ -284,6 +284,7 @@ voice_assistant:
     - wait_until:
         media_player.is_idle:
     - lambda: id(voice_assistant_phase) = ${voice_assist_idle_phase_id};
+    - script.execute: reset_volume
     - script.execute: draw_display
 
   on_end:
@@ -334,6 +335,7 @@ voice_assistant:
   on_timer_finished:
     - script.execute: stop_voice_assistant
     - lambda: id(voice_assistant_phase) = ${voice_assist_timer_finished_phase_id};
+    - script.execute: set_alarm_volume
     - switch.turn_on: timer_ringing
     - script.execute: draw_display
     - wait_until:
@@ -343,13 +345,13 @@ voice_assistant:
         condition:
           switch.is_on: timer_ringing
         then:
-          # - media_player.play_media: !lambda return id(timer_finished_wave_file)
           - media_player.play_media: 'http://homeassistant.local:8123/local/esphome/timer_finished.mp3'
           - delay: 1s
           - wait_until:
               media_player.is_idle:
     - wait_until:
         media_player.is_idle:
+    - script.execute: reset_volume
     - switch.turn_off: timer_ringing
     - script.execute: start_voice_assistant
     - script.execute: draw_display
@@ -540,6 +542,48 @@ script:
             - voice_assistant.stop:
             - micro_wake_word.stop:
       - lambda: id(voice_assistant_phase) = ${voice_assist_not_ready_phase_id};
+  - id: set_speech_volume
+    then:
+      - script.execute: save_volume
+      - media_player.volume_set: !lambda return 0.5 + id(speech_volume).state * 0.005;
+  - id: set_alarm_volume
+    then:
+      - script.execute: save_volume
+      - media_player.volume_set: !lambda return id(alarm_volume).state * 0.01;
+  - id: save_volume
+    then:
+      - globals.set:
+          id: media_volume
+          value: !lambda return id(adf_media_player).volume * 100;
+  - id: reset_volume
+    then:
+      - media_player.volume_set: !lambda return id(media_volume) * 0.01;
+number:
+  - platform: template
+    name: Speech volume
+    id: speech_volume
+    min_value: 0.0
+    max_value: 100.0
+    initial_value: 100.0
+    step: 1.0
+    optimistic: true
+    restore_value: true
+    entity_category: config
+    icon: "mdi:volume-high"
+    mode: slider
+
+  - platform: template
+    name: Alarm volume
+    id: alarm_volume
+    min_value: 0.0
+    max_value: 100.0
+    initial_value: 100.0
+    step: 1.0
+    optimistic: true
+    restore_value: true
+    entity_category: config
+    icon: "mdi:volume-high"
+    mode: slider
 
 switch:
   - platform: template
@@ -663,6 +707,9 @@ globals:
   - id: global_is_timer
     type: bool
     restore_value: false
+  - id: media_volume
+    type: float
+    restore_value: false
 
 image:
   - file: ${error_illustration_file}
@@ -773,10 +820,6 @@ color:
     hex: "26ed3a"
   - id: paused_timer_color
     hex: "3b89e3"
-
-# file:
-#   - id: timer_finished_wave_file
-#     file: https://github.com/esphome/firmware/raw/main/voice-assistant/sounds/timer_finished.wav
 
 spi:
   - id: spi_bus
