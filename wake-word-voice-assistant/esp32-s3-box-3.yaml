@@ -165,11 +165,10 @@ output:
 light:
   - platform: monochromatic
     id: led
-    name: LCD Backlight
-    entity_category: config
     output: backlight_output
     restore_mode: RESTORE_DEFAULT_ON
     default_transition_length: 250ms
+    internal: true
 
 i2c:
   - id: bus_a
@@ -256,6 +255,7 @@ voice_assistant:
   volume_multiplier: 2.0
   # vad_threshold: 3
   on_listening:
+    - script.execute: show_display
     - lambda: id(voice_assistant_phase) = ${voice_assist_listening_phase_id};
     - text_sensor.template.publish:
         id: text_request
@@ -299,6 +299,7 @@ voice_assistant:
               not:
                 voice_assistant.is_running:
           - micro_wake_word.start:
+    - script.execute: hide_display
   on_error:
     - if:
         condition:
@@ -355,8 +356,28 @@ voice_assistant:
     - switch.turn_off: timer_ringing
     - script.execute: start_voice_assistant
     - script.execute: draw_display
+    - script.execute: hide_display
 
 script:
+  - id: show_display
+    then:
+      - if:
+          condition:
+            and:
+              - lambda: return id(lcd_backlight).state == "Auto";
+              - light.is_off: led
+          then:
+            light.turn_on: led
+  - id: hide_display
+    then:
+      - if:
+          condition:
+            and:
+              - lambda: return id(lcd_backlight).state == "Auto";
+              - lambda: return !id(global_is_timer);
+              - switch.is_off: timer_ringing
+          then:
+            light.turn_off: led
   - id: draw_display
     then:
       - if:
@@ -685,6 +706,30 @@ select:
                         switch.is_off: mute
                       then:
                         - micro_wake_word.start
+  - platform: template
+    entity_category: config
+    name: LCD Backlight
+    id: lcd_backlight
+    optimistic: true
+    restore_value: true
+    options:
+      - "On"
+      - "Off"
+      - "Auto"
+    initial_option: "On"
+    on_value:
+      - if:
+          condition:
+            lambda: return x == "On";
+          then:
+            - light.turn_on: led
+      - if:
+          condition:
+            or:
+              - lambda: return x == "Auto";
+              - lambda: return x == "Off";
+          then:
+            - light.turn_off: led
 
 globals:
   - id: init_in_progress
